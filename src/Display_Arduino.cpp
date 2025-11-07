@@ -7,7 +7,7 @@
 // - battery voltage monitor (1 analog pin)
 // - MQ-135 CO2 sensor (1 analog pin)
 // - 4 led's (4 digital pins):
-//     - power on
+//     - battery low
 //     - CO2 alert
 //     - water too low
 //     - temperature alert
@@ -64,12 +64,25 @@ Connections (pins):
 #define CO2_A 110.47
 #define CO2_B -2.862
 
-// Compile-Time Constants
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+// Compile-Time Constants ////////////////////////////////////////////////////////////////////////////////////
 constexpr int CO2_Reads_delayTime = 2000;
 constexpr float MIN_CO2_THRESHOLD = 1000.0; // ppm
 constexpr float MAX_CO2_THRESHOLD = 5000.0; // ppm
 
 constexpr float LOW_BATTERY_THRESHOLD = 3.3; // volts
+
+constexpr int maxTemperature_Celsius = 50;
+constexpr int minTemperature_Celsius = 0;  
+
+constexpr int minWaterLevel_TopTank_Percent = 20;
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+// Arduino Cloud variables ////////////////////////////////////////////////////////////////////////////////////
+volatile int currentTemperature_Celsius = 25;
+volatile int waterLevel_TopTank_Percent = 100;
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 void setup() {
     Serial.begin(9600);
@@ -117,6 +130,14 @@ float getCO2_ppm() {
 
 void loop() {
 
+    // BATTERY MONITOR LOGIC
+    float batteryVoltage = (analogRead(BATTERY_MONITOR) * VOLTAGE_RESOLUTION) / ADC_RESOLUTION;
+    if (batteryVoltage <= LOW_BATTERY_THRESHOLD) {
+        digitalWrite(LOW_BATTERY_LED, HIGH);
+    } else {
+        digitalWrite(LOW_BATTERY_LED, LOW);
+    }
+
     // CO2 LOGIC
     float co2ppm = getCO2_ppm();
 
@@ -126,12 +147,18 @@ void loop() {
         digitalWrite(CO2_ALERT_LED, LOW);
     }
 
-    // BATTERY MONITOR LOGIC
-    float batteryVoltage = (analogRead(BATTERY_MONITOR) * VOLTAGE_RESOLUTION) / ADC_RESOLUTION;
-    if (batteryVoltage <= LOW_BATTERY_THRESHOLD) {
-        digitalWrite(LOW_BATTERY_LED, HIGH);
+    // WATER LEVEL LOGIC
+    if (waterLevel_TopTank_Percent <= minWaterLevel_TopTank_Percent) { 
+        digitalWrite(WATER_LOW_LED, HIGH);
     } else {
-        digitalWrite(LOW_BATTERY_LED, LOW);
+        digitalWrite(WATER_LOW_LED, LOW);
+    }
+
+    // TEMPERATURE LOGIC
+    if (currentTemperature_Celsius >= maxTemperature_Celsius || currentTemperature_Celsius <= minTemperature_Celsius) {
+        digitalWrite(TEMP_ALERT_LED, HIGH);
+    } else {
+        digitalWrite(TEMP_ALERT_LED, LOW);
     }
 
     delay(500); // Main loop delay
