@@ -64,7 +64,16 @@ Connections (pins):
 #define CO2_A 110.47
 #define CO2_B -2.862
 
+// Compile-Time Constants
+constexpr int CO2_Reads_delayTime = 2000;
+constexpr float MIN_CO2_THRESHOLD = 1000.0; // ppm
+constexpr float MAX_CO2_THRESHOLD = 5000.0; // ppm
+
 void setup() {
+    Serial.begin(9600);
+
+    analogReadResolution(12); // UNO R4 has 12-bit ADC for better accuracy with MQ-135
+
     pinMode(TEMP_ALERT_LED, OUTPUT);
     pinMode(LOW_BATTERY_LED, OUTPUT);
     pinMode(CO2_ALERT_LED, OUTPUT);
@@ -75,6 +84,39 @@ void setup() {
     pinMode(ROTARY_CLK, INPUT);
 }
 
-void loop() {
+float getCO2_ppm() {
+    static float co2ppm = 0.0; 
+    static int lastReadTime = 0;
 
+    int currentTime;
+    currentTime = millis();
+
+    if (currentTime - lastReadTime < CO2_Reads_delayTime) {
+        return co2ppm; // Return last read value if delay time not met
+    }
+
+    int adcValue = analogRead(MQ135_PIN);
+    float voltage = (adcValue * VOLTAGE_RESOLUTION) / ADC_RESOLUTION;
+    float rs = ((VOLTAGE_RESOLUTION * RL_VALUE) / voltage) - RL_VALUE;
+    float ratio = rs / R0;
+    co2ppm = CO2_A * pow(ratio, CO2_B);
+
+    // Serial.print("CO2 PPM: ");
+    // Serial.println(co2ppm, 1);
+
+    lastReadTime = currentTime;
+
+    return co2ppm;
+}
+
+void loop() {
+    float co2ppm = getCO2_ppm();
+
+    if (co2ppm <= MIN_CO2_THRESHOLD || MAX_CO2_THRESHOLD <= co2ppm) {
+        digitalWrite(CO2_ALERT_LED, HIGH);
+    } else {
+        digitalWrite(CO2_ALERT_LED, LOW);
+    }
+
+    delay(500); // Main loop delay
 }
