@@ -82,6 +82,10 @@ void setup() {
     pinMode(ROTARY_DT, INPUT);
     pinMode(ROTARY_SW, INPUT);
     pinMode(ROTARY_CLK, INPUT);
+
+    // Attach interrupts to detect rotary encoder changes
+    attachInterrupt(digitalPinToInterrupt(ROTARY_CLK), rotaryUpdate, CHANGE);  // Detect rotary movement
+    attachInterrupt(digitalPinToInterrupt(ROTARY_SW), buttonPressOnRotaryEncoder, FALLING);  // Detect button press (active low)
 }
 
 float getCO2_ppm() {
@@ -119,4 +123,32 @@ void loop() {
     }
 
     delay(500); // Main loop delay
+}
+
+void buttonPressOnRotaryEncoder() {
+  if (digitalRead(ROTARY_SW) == LOW) {  // Button pressed (active low)
+    Serial.println("Button pressed!");
+    // do something...
+  }
+}
+
+// Function to handle rotary encoder
+void rotaryUpdate() {
+  static int last_clk = LOW;  // Store last clock pin state
+  static int count = 0;
+
+  int clk_state = digitalRead(ROTARY_CLK);
+  int dt_state = digitalRead(ROTARY_DT);
+
+  if (clk_state != last_clk) {
+    if (dt_state != clk_state) {
+      count--;  // Clockwise rotation
+    } else {
+      count++;  // Counter-clockwise rotation
+    }
+    // currentMode = abs((count / 2) % ModeCnt); // updates every 2 turns for better user feel (it has stoppers every 2 readings)
+
+  }
+
+  last_clk = clk_state;
 }
