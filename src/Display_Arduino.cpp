@@ -1,4 +1,7 @@
 #include <Arduino.h>
+#include <SPI.h>
+#include <Adafruit_GFX.h>
+#include <Adafruit_ILI9341.h>
 
 /* /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 // Components to be added:
@@ -84,6 +87,26 @@ volatile int currentTemperature_Celsius = 25;
 volatile int waterLevel_TopTank_Percent = 100;
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
+Adafruit_ILI9341 tft = Adafruit_ILI9341(TFT_CS, TFT_DC, TFT_RST);
+
+enum MenuMode {
+    MODE_OVERVIEW,
+    MODE_TEMPERATURE,
+    MODE_WATER_LEVEL,
+    MODE_CO2_LEVEL,
+    MODE_BATTERY_STATUS,
+    ModeCnt
+};
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+// Global Variables ////////////////////////////////////////////////////////////////////////////////////
+int currentMode = MODE_OVERVIEW;
+volatile int rotaryEncoderTurnCount = 0;
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+void buttonPressOnRotaryEncoder();
+void rotaryUpdate();
+
 void setup() {
     Serial.begin(9600);
 
@@ -97,6 +120,12 @@ void setup() {
     pinMode(ROTARY_DT, INPUT);
     pinMode(ROTARY_SW, INPUT);
     pinMode(ROTARY_CLK, INPUT);
+
+    tft.begin();
+    SPI.beginTransaction(SPISettings(125000, MSBFIRST, SPI_MODE0)); // 4 MHz
+    tft.setRotation(1);
+    tft.fillScreen(ILI9341_BLACK);
+    tft.setTextColor(ILI9341_WHITE);
 
     // Attach interrupts to detect rotary encoder changes
     attachInterrupt(digitalPinToInterrupt(ROTARY_CLK), rotaryUpdate, CHANGE);  // Detect rotary movement
@@ -128,8 +157,91 @@ float getCO2_ppm() {
     return co2ppm;
 }
 
+#pragma region Menu Mode Functions
+
+void Mode_Overview_Display() {
+    tft.fillScreen(ILI9341_BLACK);
+    tft.setTextColor(ILI9341_WHITE);
+    tft.setCursor(0, 0);
+    tft.setTextSize(2);
+    tft.println("Overview Mode");
+
+    tft.setCursor(0, 30);
+    tft.setTextSize(1);
+    tft.print("Temp: ");
+    tft.print(currentTemperature_Celsius);
+    tft.println(" C");
+
+    tft.setCursor(0, 50);
+    tft.print("Water Level: ");
+    tft.print(waterLevel_TopTank_Percent);
+    tft.println(" %");
+
+    float co2ppm = getCO2_ppm();
+    tft.setCursor(0, 70);
+    tft.print("CO2: ");
+    tft.print(co2ppm, 1);
+    tft.println(" ppm");
+
+    float batteryVoltage = (analogRead(BATTERY_MONITOR) * VOLTAGE_RESOLUTION) / ADC_RESOLUTION;
+    tft.setCursor(0, 90);
+    tft.print("Battery: ");
+    tft.print(batteryVoltage, 2);
+    tft.println(" V");
+    // Add more display elements as needed
+}
+
+void Mode_Temperature_Display() {
+
+    tft.fillScreen(ILI9341_RED);
+    tft.setTextColor(ILI9341_BLUE);
+    tft.setTextSize(3);
+    tft.setCursor(120, 160); // Center of the screen
+    tft.println("Degrees C:");
+    tft.setCursor(140, 200);
+    tft.println(currentTemperature_Celsius);
+}
+
+void Mode_WaterLevel_Display() {
+
+    tft.fillScreen(ILI9341_BLUE);
+    tft.setTextColor(ILI9341_WHITE);
+    tft.setTextSize(3);
+    tft.setCursor(100, 160); // Center of the screen
+    tft.println("Water Level %:");
+    tft.setCursor(140, 200);
+    tft.println(waterLevel_TopTank_Percent);
+}
+
+void Mode_CO2Level_Display() {
+    float co2ppm = getCO2_ppm();
+
+    tft.fillScreen(ILI9341_GREEN);
+    tft.setTextColor(ILI9341_BLACK);
+    tft.setTextSize(3);
+    tft.setCursor(100, 160); // Center of the screen
+    tft.println("CO2 ppm:");
+    tft.setCursor(140, 200);
+    tft.println(co2ppm, 1);
+}
+
+void Mode_BatteryStatus_Display() {
+    float batteryVoltage = (analogRead(BATTERY_MONITOR) * VOLTAGE_RESOLUTION) / ADC_RESOLUTION;
+
+    tft.fillScreen(ILI9341_YELLOW);
+    tft.setTextColor(ILI9341_BLACK);
+    tft.setTextSize(3);
+    tft.setCursor(100, 160); // Center of the screen
+    tft.println("Battery V:");
+    tft.setCursor(140, 200);
+    tft.println(batteryVoltage, 2);
+}
+
+#pragma endregion
+
 void loop() {
 
+#pragma region Alerts Logic
     // BATTERY MONITOR LOGIC
     float batteryVoltage = (analogRead(BATTERY_MONITOR) * VOLTAGE_RESOLUTION) / ADC_RESOLUTION;
     if (batteryVoltage <= LOW_BATTERY_THRESHOLD) {
@@ -160,6 +272,35 @@ void loop() {
     } else {
         digitalWrite(TEMP_ALERT_LED, LOW);
     }
+#pragma endregion
+
+#pragma region Display Update Logic
+
+currentMode = abs((rotaryEncoderTurnCount / 4) % ModeCnt); // updates every 4 turns for better user feel (it has stoppers every 2 readings)
+
+    switch (currentMode) {
+        case MODE_OVERVIEW:
+            Mode_Overview_Display();
+            break;
+        case MODE_TEMPERATURE:
+            Mode_Temperature_Display();
+            break;
+        case MODE_WATER_LEVEL:
+            Mode_WaterLevel_Display();
+            break;
+        case MODE_CO2_LEVEL:
+            Mode_CO2Level_Display();
+            break;
+        case MODE_BATTERY_STATUS:
+            Mode_BatteryStatus_Display();
+            break;
+        // Add cases for other modes as needed
+        default:
+            Mode_Overview_Display();
+            break;
+    }
+
+#pragma endregion
 
     delay(500); // Main loop delay
 }
@@ -174,16 +315,15 @@ void buttonPressOnRotaryEncoder() {
 // Function to handle rotary encoder
 void rotaryUpdate() {
   static int last_clk = LOW;  // Store last clock pin state
-  static int count = 0;
 
   int clk_state = digitalRead(ROTARY_CLK);
   int dt_state = digitalRead(ROTARY_DT);
 
   if (clk_state != last_clk) {
     if (dt_state != clk_state) {
-      count--;  // Clockwise rotation
+      rotaryEncoderTurnCount--;  // Clockwise rotation
     } else {
-      count++;  // Counter-clockwise rotation
+      rotaryEncoderTurnCount++;  // Counter-clockwise rotation
     }
     // currentMode = abs((count / 2) % ModeCnt); // updates every 2 turns for better user feel (it has stoppers every 2 readings)
 
