@@ -53,13 +53,13 @@ Connections (pins):
 
 #define BATTERY_MONITOR      A1
 
-#define MQ135_PIN           A2
+#define MQ135_PIN            A2
 
 // MQ-135 CO2 Sensor constants
 #define RL_VALUE 10.0         // Load resistance (kΩ)
 #define R0 76.63              // Sensor resistance in clean air (calibrate!)
 #define VOLTAGE_RESOLUTION 5.0
-#define ADC_RESOLUTION 4095.0 // 12-bit ADC on UNO R4
+#define ADC_RESOLUTION 4095.0 // 12-bit ADC on UNO R4 WIFI
 
 #define CO2_A 110.47
 #define CO2_B -2.862
@@ -68,6 +68,8 @@ Connections (pins):
 constexpr int CO2_Reads_delayTime = 2000;
 constexpr float MIN_CO2_THRESHOLD = 1000.0; // ppm
 constexpr float MAX_CO2_THRESHOLD = 5000.0; // ppm
+
+constexpr float LOW_BATTERY_THRESHOLD = 3.3; // volts
 
 void setup() {
     Serial.begin(9600);
@@ -114,12 +116,22 @@ float getCO2_ppm() {
 }
 
 void loop() {
+
+    // CO2 LOGIC
     float co2ppm = getCO2_ppm();
 
     if (co2ppm <= MIN_CO2_THRESHOLD || MAX_CO2_THRESHOLD <= co2ppm) {
         digitalWrite(CO2_ALERT_LED, HIGH);
     } else {
         digitalWrite(CO2_ALERT_LED, LOW);
+    }
+
+    // BATTERY MONITOR LOGIC
+    float batteryVoltage = (analogRead(BATTERY_MONITOR) * VOLTAGE_RESOLUTION) / ADC_RESOLUTION;
+    if (batteryVoltage <= LOW_BATTERY_THRESHOLD) {
+        digitalWrite(LOW_BATTERY_LED, HIGH);
+    } else {
+        digitalWrite(LOW_BATTERY_LED, LOW);
     }
 
     delay(500); // Main loop delay
