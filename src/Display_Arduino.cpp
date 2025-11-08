@@ -7,8 +7,6 @@
 // Components to be added:
 // - display (6 digital pins)
 // - rotary encoder (3 digital pins)
-// - battery voltage monitor (1 analog pin)
-// - MQ-135 CO2 sensor (1 analog pin)
 // - 4 led's (4 digital pins):
 //     - battery low
 //     - CO2 alert
@@ -19,10 +17,10 @@
 /* /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 Connections (pins):
 - LEDs:
-    - TEMP_ALERT_LED-> Pin 2
-    - LOW_BATTERY_LED     -> Pin 3
-    - CO2_ALERT_LED -> Pin 4
-    - WATER_LOW_LED -> Pin 5
+    - TEMP_ALERT_LED    -> Pin 2
+    - LOW_BATTERY_LED   -> Pin 3
+    - CO2_ALERT_LED     -> Pin 4
+    - WATER_LOW_LED     -> Pin 5
 - Rotary Encoder:
     - CLK -> Pin A0 (will be used with "digitalRead()")
     - DT  -> Pin 6
@@ -34,10 +32,6 @@ Connections (pins):
     - MOSI-> Pin 11
     - MISO-> Pin 12
     - SCK -> Pin 13
-- Battery Voltage Monitor:
-    - BAT_MON -> A1
-- MQ-135 CO2 Sensor:
-    - MQ135_PIN -> A2
 */ ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 // pin declarations
