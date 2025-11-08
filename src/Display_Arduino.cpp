@@ -96,9 +96,9 @@ volatile int rotaryEncoderTurnCount = 4;
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 // Global Screen "Old" variables for screen flickering workaround ////////////////////////////////////////////////////////////////////////////////////
 float old_CO2_ppm = currentTemperature_Celsius;
-float old_batteryVoltage_V = current_BatteryVoltage_V;
+float old_BatteryVoltage_V = current_BatteryVoltage_V;
 int old_Temperature_Celsius = currentTemperature_Celsius;
-int old_waterLevel_TopTank_Percent = current_WaterLevel_TopTank_Percent;
+int old_WaterLevel_TopTank_Percent = current_WaterLevel_TopTank_Percent;
 float old_LightLevel_Lux = currentLightLevel_Lux;
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
@@ -158,7 +158,7 @@ void Mode_Overview_Display() {
     tft.setCursor(0, 50);
     tft.setTextColor(ILI9341_BLACK);
     tft.print("Water Level: ");
-    tft.print(current_WaterLevel_TopTank_Percent);
+    tft.print(old_WaterLevel_TopTank_Percent);
     tft.println(" %");
     tft.setCursor(0, 50);
     tft.setTextColor(ILI9341_WHITE);
@@ -169,7 +169,7 @@ void Mode_Overview_Display() {
     tft.setCursor(0, 70);
     tft.setTextColor(ILI9341_BLACK);
     tft.print("CO2: ");
-    tft.print(current_CO2_ppm, 1);
+    tft.print(old_CO2_ppm, 1);
     tft.println(" ppm");
     tft.setCursor(0, 70);
     tft.setTextColor(ILI9341_WHITE);
@@ -180,7 +180,7 @@ void Mode_Overview_Display() {
     tft.setCursor(0, 90);
     tft.setTextColor(ILI9341_BLACK);
     tft.print("Battery: ");
-    tft.print(current_BatteryVoltage_V, 2);
+    tft.print(old_BatteryVoltage_V, 2);
     tft.println(" V");
     tft.setCursor(0, 90);
     tft.setTextColor(ILI9341_WHITE);
@@ -264,7 +264,7 @@ void Mode_WaterLevel_Display() {
     tft.setCursor(60, 80);
     tft.println("Water Level:");
     tft.setCursor(130, 115);
-    tft.print(current_WaterLevel_TopTank_Percent);
+    tft.print(old_WaterLevel_TopTank_Percent);
     tft.println("%");
     
     tft.setTextColor(ILI9341_WHITE);
@@ -288,7 +288,7 @@ void Mode_CO2Level_Display() {
     tft.setCursor(60, 80);
     tft.println("CO2 Density:");
     tft.setCursor(90, 115);
-    tft.print(current_CO2_ppm, 0);
+    tft.print(old_CO2_ppm, 0);
     tft.println(" ppm");
 
     tft.setTextColor(ILI9341_BLACK);
@@ -311,7 +311,7 @@ void Mode_BatteryStatus_Display() {
     tft.fillScreen(ILI9341_YELLOW);
     tft.println("Battery V:");
     tft.setCursor(130, 130);
-    tft.println(current_BatteryVoltage_V, 2);
+    tft.println(old_BatteryVoltage_V, 2);
 
     tft.setCursor(80, 90); // Center of the screen
     tft.fillScreen(ILI9341_YELLOW);
@@ -409,10 +409,10 @@ currentMode = abs((rotaryEncoderTurnCount / 4) % ModeCnt); // updates every 4 tu
 
     lastMode = currentMode; // Update last mode
 
-    old_batteryVoltage_V = current_BatteryVoltage_V;
+    old_BatteryVoltage_V = current_BatteryVoltage_V;
     old_CO2_ppm = current_CO2_ppm;
     old_Temperature_Celsius = currentTemperature_Celsius;
-    old_waterLevel_TopTank_Percent = current_WaterLevel_TopTank_Percent;
+    old_WaterLevel_TopTank_Percent = current_WaterLevel_TopTank_Percent;
 
 #pragma endregion
 

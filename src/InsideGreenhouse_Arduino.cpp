@@ -2,6 +2,8 @@
 #include <Wire.h>
 #include <Digital_Light_TSL2561.h>
 #include <DHT.h>
+#include <Servo.h>
+#include <Stepper.h>
 
 /* /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 // Components to be added:
@@ -60,13 +62,8 @@
 //     - humidity too high -> decrease ventilation (close cooling trap more), turn on cooling fan
 //     - temperature too low -> turn on heater, turn off cooling fan & close cooling trap
 //     - temperature too high -> turn on cooling fan & open cooling trap, turn off heater
-// 
-// - Array of pointers to functions that influence each component (Heater, Fan, Ventilation Servo, Shade Stepper Motor):
-//     - iterate through each function pointer (they are ordered from lowest priority to highest) and call the function to update the component state 
-//     - higher priority functions will override lower priority ones's actions
-// 
+
 // - Function priority order (from lowest to highest):
-//     - humidity control
 //     - temperature control
 //     - light level control
 //     - CO2 control
@@ -103,9 +100,20 @@
 constexpr int CO2_Reads_delayTime = 2000;
 constexpr float MIN_CO2_THRESHOLD = 1000.0; // ppm
 constexpr float MAX_CO2_THRESHOLD = 5000.0; // ppm
+constexpr float CO2_Hysteresis_ppm = 200.0; // CO2 difference before switching states to avoid oscillation
 
 constexpr int maxTemperature_Celsius = 50;
 constexpr int minTemperature_Celsius = 0;  
+constexpr int temperatureHysteresis_Celsius = 2; // Temperature difference before switching states to avoid oscillation
+
+constexpr int maxHumidity_Percent = 80;
+constexpr int minHumidity_Percent = 40;
+
+constexpr int closed_VentilationServoAngle = 40;   // degrees
+constexpr int open_VentilationServoAngle = 180;    // degrees
+
+constexpr int stepsPerRevolution_StepperMotor = 2048; // for 28BYJ-48 stepper motor
+constexpr int spaceBetweenShadeLevels_Steps = 2048 * 8; // 8 revolutions for passing from one shade level to another
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -118,18 +126,36 @@ volatile int current_WaterLevel_TopTank_Percent = 100;
 volatile float current_CO2_ppm = 1200; // dummy value
 volatile float current_BatteryVoltage_V = 4.2; // dummy value
 volatile float currentLightLevel_Lux = 1500; // dummy value
+volatile int targetShadeLevel = 0; // desired shade level
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 // Global Variables ////////////////////////////////////////////////////////////////////////////////////
 int currentShadeLevel = 0; // initial shade level
+int Relay_HeaterLight_TargetState = 0;
+int Relay_ColingFan_TargetState = 0;
+int Servo_CoolingVentilator_TargetAngle = closed_VentilationServoAngle;
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+// Global Screen "Old" variables for screen flickering workaround ////////////////////////////////////////////////////////////////////////////////////
+float old_CO2_ppm = currentTemperature_Celsius;
+float old_BatteryVoltage_V = current_BatteryVoltage_V;
+int old_Temperature_Celsius = currentTemperature_Celsius;
+int old_WaterLevel_TopTank_Percent = current_WaterLevel_TopTank_Percent;
+float old_LightLevel_Lux = currentLightLevel_Lux;
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+
 #pragma endregion
 
 DHT dht(DHT_SENSOR_PIN, DHT_TYPE);
+Servo coolingVentilatorServo;
+Stepper stepperMotor_shadeLevel(stepsPerRevolution_StepperMotor, 8, 9, 10, 11);
 
+// recorded lux values per light intensity: 1200, 6000, 15000, 55000
 // upper lux shade thresholds
-constexpr unsigned int shadeLevel_LuxThresholds[] = {500, 1000, 2000, 0xFFFFFFFF}; // -1, 0, 1, 2
+constexpr unsigned int shadeLevel_LuxThresholds[] = {1200, 6000, 15000, 0xFFFFFFFF}; // -1, 0, 1, 2
 
 #pragma region Update_Global_Variables_Functions
 void updateLightLevel() {
@@ -178,19 +204,81 @@ void updateHumidityAndTemperature() {
     // Serial.print(currentTemperature_Celsius);
     // Serial.println(" C");
 }
+
+void updateAllSensors() {
+    old_BatteryVoltage_V = current_BatteryVoltage_V;
+    old_CO2_ppm = current_CO2_ppm;
+    old_Temperature_Celsius = currentTemperature_Celsius;
+    old_WaterLevel_TopTank_Percent = current_WaterLevel_TopTank_Percent;
+
+    updateLightLevel();
+    updateBatteryVoltage();
+    updateCO2_ppm();
+    updateHumidityAndTemperature();
+
+    // handle ARDUINO CLOUD sync here
+}
 #pragma endregion   
 
 #pragma region Control_Functions
+void controlTemperature() {
+    if (currentTemperature_Celsius <= minTemperature_Celsius - temperatureHysteresis_Celsius) {
+        digitalWrite(HEATER_RELAY_PIN, HIGH);
+        digitalWrite(COOLING_FAN_RELAY_PIN, LOW);
+        coolingVentilatorServo.write(closed_VentilationServoAngle);
+        return;
+    }
+    if (currentTemperature_Celsius >= maxTemperature_Celsius + temperatureHysteresis_Celsius) {
+        digitalWrite(HEATER_RELAY_PIN, LOW);
+        digitalWrite(COOLING_FAN_RELAY_PIN, HIGH);
+        ;
+        return;
+    }
+
+    // Within acceptable range
+    digitalWrite(HEATER_RELAY_PIN, LOW);
+    digitalWrite(COOLING_FAN_RELAY_PIN, LOW);
+
+    // We will progressively open / close the ventilation servo based on temperature
+    int servoAngle = map(currentTemperature_Celsius, minTemperature_Celsius, maxTemperature_Celsius, closed_VentilationServoAngle, open_VentilationServoAngle);
+}
+
+void controlLightLevel() {
+
+    for (int i = 0; i < sizeof(shadeLevel_LuxThresholds) / sizeof(shadeLevel_LuxThresholds[0]); i++) {
+        if (currentLightLevel_Lux < shadeLevel_LuxThresholds[i]) {
+            targetShadeLevel = i - 1;
+            break;
+        }
+    }
+
+    if (targetShadeLevel != currentShadeLevel) {
+        int stepsToMove = (targetShadeLevel - currentShadeLevel) * spaceBetweenShadeLevels_Steps;
+        stepperMotor_shadeLevel.step(stepsToMove); // Move stepper motor to target shade level
+        currentShadeLevel = targetShadeLevel;
+    }
+
+    if (currentShadeLevel == -1) {
+        digitalWrite(HEATER_RELAY_PIN, HIGH);
+    } else {
+        digitalWrite(HEATER_RELAY_PIN, LOW);
+    }
+}
+
+void controlCO2() {
+    // CO2 to HIGH - danger to people -> decrease by Hysteresis instead of adding to max to avoid "killing" people with the Hysteresis surpassi
+    if (current_CO2_ppm >= MAX_CO2_THRESHOLD - CO2_Hysteresis_ppm) {
+        digitalWrite(COOLING_FAN_RELAY_PIN, HIGH);
+        coolingVentilatorServo.write(open_VentilationServoAngle);
+        return;
+    }
+    if (current_CO2_ppm <= MIN_CO2_THRESHOLD - CO2_Hysteresis_ppm) {
+        digitalWrite(COOLING_FAN_RELAY_PIN, LOW);
+        return;
+    }
+}
 
 #pragma endregion
-
-// priority function pointers array
-void (*controlFunctions[])() = {
-    // humidity control function pointer (to be implemented)
-    // temperature control function pointer (to be implemented)
-    // light level control function pointer (to be implemented)
-    // CO2 control function pointer (to be implemented)
-};
 
 void setup() {
     Serial.begin(9600);
@@ -201,9 +289,22 @@ void setup() {
     pinMode(VENTILATION_SERVO_PIN, OUTPUT);
 
     TSL2561.init();
+
+    coolingVentilatorServo.attach(VENTILATION_SERVO_PIN);
 }
 
 void loop() {
+    updateAllSensors();
+
+    if (currentTemperature_Celsius != old_Temperature_Celsius) {
+        controlTemperature();
+    }
+    if (currentLightLevel_Lux != old_LightLevel_Lux) {
+        controlLightLevel();
+    }
+    if (current_CO2_ppm != old_CO2_ppm) {
+        controlCO2();
+    }
 
     delay(3000);
 }
