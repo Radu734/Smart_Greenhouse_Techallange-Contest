@@ -1,9 +1,12 @@
 #include <Arduino.h>
+#include <Wire.h>
+#include <Digital_Light_TSL2561.h>
+#include <DHT.h>
 
 /* /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 // Components to be added:
 // - Battery Voltage Monitor (1 analog pin)
-// - Light Level Sensor (1 analog pin)
+// - Light Level Sensor (I2C)
 // - MQ-135 CO2 sensor (1 analog pin)
 // - Relay Heater Light (1 digital pin)
 // - Relay Cooling Fan (1 digital pin)
@@ -17,7 +20,7 @@
 // - Battery Voltage Monitor:
 //     - VOLTAGE_MONITOR_PIN       -> A0
 // - Light Level Sensor:
-//     - LIGHT_LEVEL_SENSOR_PIN    -> A1
+//     - LIGHT_LEVEL_SENSOR_PIN    -> I2C
 // - MQ-135 CO2 Sensor:
 //     - MQ135_PIN                 -> A2
 // - Heater Light Relay:
@@ -76,15 +79,118 @@
 #define HEATER_RELAY_PIN           2
 #define COOLING_FAN_RELAY_PIN      3
 #define VENTILATION_SERVO_PIN      4
+
 #define DHT_SENSOR_PIN             5
+#define DHT_TYPE                   DHT22
 
 #define STEPPER_MOTOR_PIN_1       8
 #define STEPPER_MOTOR_PIN_2       9
 #define STEPPER_MOTOR_PIN_3      10
 #define STEPPER_MOTOR_PIN_4      11
 
+// MQ-135 CO2 Sensor constants
+#define RL_VALUE 10.0         // Load resistance (kΩ)
+#define R0 76.63              // Sensor resistance in clean air (calibrate!)
+#define VOLTAGE_RESOLUTION 5.0
+#define ADC_RESOLUTION 4095.0 // 12-bit ADC on UNO R4 WIFI
+
+#define CO2_A 110.47
+#define CO2_B -2.862
+
+#pragma region Variable_Definitions
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+// Compile-Time Constants ////////////////////////////////////////////////////////////////////////////////////
+constexpr int CO2_Reads_delayTime = 2000;
+constexpr float MIN_CO2_THRESHOLD = 1000.0; // ppm
+constexpr float MAX_CO2_THRESHOLD = 5000.0; // ppm
+
+constexpr int maxTemperature_Celsius = 50;
+constexpr int minTemperature_Celsius = 0;  
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+// Arduino Cloud variables ////////////////////////////////////////////////////////////////////////////////////
+// Needs to be Synced between the Display arduino and this arduino ////////////////////////////////////////////////////////////////////////////////////
+volatile int currentTemperature_Celsius = 25;
+volatile int currentHumidity_Percent = 50;
+volatile int currentAQI_Index = 1; // dummy value OPTIONAL - can be calculated on the Display Arduino
+volatile int current_WaterLevel_TopTank_Percent = 100;
+volatile float current_CO2_ppm = 1200; // dummy value
+volatile float current_BatteryVoltage_V = 4.2; // dummy value
+volatile float currentLightLevel_Lux = 1500; // dummy value
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+// Global Variables ////////////////////////////////////////////////////////////////////////////////////
+int currentShadeLevel = 0; // initial shade level
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+#pragma endregion
+
+DHT dht(DHT_SENSOR_PIN, DHT_TYPE);
+
 // upper lux shade thresholds
 constexpr unsigned int shadeLevel_LuxThresholds[] = {500, 1000, 2000, 0xFFFFFFFF}; // -1, 0, 1, 2
+
+#pragma region Update_Global_Variables_Functions
+void updateLightLevel() {
+  currentLightLevel_Lux = TSL2561.readVisibleLux();
+}
+
+void updateBatteryVoltage() {
+    current_BatteryVoltage_V = (analogRead(VOLTAGE_MONITOR_PIN) * VOLTAGE_RESOLUTION) / ADC_RESOLUTION;
+}
+
+void updateCO2_ppm() {
+    
+    static int lastReadTime = 0;
+
+    int currentTime;
+    currentTime = millis();
+
+    if (currentTime - lastReadTime < CO2_Reads_delayTime) {
+        return; // Return last read value if delay time not met
+    }
+
+    int adcValue = analogRead(MQ135_PIN);
+    float voltage = (adcValue * VOLTAGE_RESOLUTION) / ADC_RESOLUTION;
+    float rs = ((VOLTAGE_RESOLUTION * RL_VALUE) / voltage) - RL_VALUE;
+    float ratio = rs / R0;
+    current_CO2_ppm = CO2_A * pow(ratio, CO2_B);
+
+    // Serial.print("CO2 PPM: ");
+    // Serial.println(current_CO2_ppm, 1);
+
+    lastReadTime = currentTime;
+}
+
+void updateHumidityAndTemperature() {
+    currentHumidity_Percent = dht.readHumidity();
+    currentTemperature_Celsius = dht.readTemperature();
+    if (isnan(currentHumidity_Percent) || isnan(currentTemperature_Celsius)) {
+        Serial.println("Failed to read from DHT sensor!");
+        return;
+    }
+    currentAQI_Index = dht.computeHeatIndex(currentTemperature_Celsius, currentHumidity_Percent, false);
+
+    // Serial.print("Humidity: ");
+    // Serial.print(currentHumidity_Percent);
+    // Serial.print(" %  |  Temperature: ");
+    // Serial.print(currentTemperature_Celsius);
+    // Serial.println(" C");
+}
+#pragma endregion   
+
+#pragma region Control_Functions
+
+#pragma endregion
+
+// priority function pointers array
+void (*controlFunctions[])() = {
+    // humidity control function pointer (to be implemented)
+    // temperature control function pointer (to be implemented)
+    // light level control function pointer (to be implemented)
+    // CO2 control function pointer (to be implemented)
+};
 
 void setup() {
     Serial.begin(9600);
@@ -93,4 +199,11 @@ void setup() {
     pinMode(HEATER_RELAY_PIN, OUTPUT);
     pinMode(COOLING_FAN_RELAY_PIN, OUTPUT);
     pinMode(VENTILATION_SERVO_PIN, OUTPUT);
+
+    TSL2561.init();
+}
+
+void loop() {
+
+    delay(3000);
 }
