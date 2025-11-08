@@ -45,27 +45,27 @@ Connections (pins):
 #define TFT_DC    8
 #define TFT_RST   9
 
-#define TEMP_ALERT_LED        2
-#define LOW_BATTERY_LED       3
-#define CO2_ALERT_LED         4
-#define WATER_LOW_LED         5
+#define TEMP_ALERT_LED        4
+#define LOW_BATTERY_LED       5
+#define CO2_ALERT_LED         6
+#define WATER_LOW_LED         7
 
-#define ROTARY_DT            6
-#define ROTARY_SW            7
-#define ROTARY_CLK           A0
+#define ROTARY_DT            2
+#define ROTARY_CLK           3
+#define ROTARY_SW            A0
 
-#define BATTERY_MONITOR      A1
+// #define BATTERY_MONITOR      A1
 
-#define MQ135_PIN            A2
+// #define MQ135_PIN            A2
 
-// MQ-135 CO2 Sensor constants
-#define RL_VALUE 10.0         // Load resistance (kΩ)
-#define R0 76.63              // Sensor resistance in clean air (calibrate!)
-#define VOLTAGE_RESOLUTION 5.0
-#define ADC_RESOLUTION 4095.0 // 12-bit ADC on UNO R4 WIFI
-
-#define CO2_A 110.47
-#define CO2_B -2.862
+// // MQ-135 CO2 Sensor constants
+// #define RL_VALUE 10.0         // Load resistance (kΩ)
+// #define R0 76.63              // Sensor resistance in clean air (calibrate!)
+// #define VOLTAGE_RESOLUTION 5.0
+// #define ADC_RESOLUTION 4095.0 // 12-bit ADC on UNO R4 WIFI
+// 
+// #define CO2_A 110.47
+// #define CO2_B -2.862
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 // Compile-Time Constants ////////////////////////////////////////////////////////////////////////////////////
@@ -85,6 +85,8 @@ constexpr int minWaterLevel_TopTank_Percent = 20;
 // Arduino Cloud variables ////////////////////////////////////////////////////////////////////////////////////
 volatile int currentTemperature_Celsius = 25;
 volatile int waterLevel_TopTank_Percent = 100;
+volatile float CO2_ppm = 1200; // dummy value
+volatile float batteryVoltage_V = 4.2; // dummy value
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 Adafruit_ILI9341 tft = Adafruit_ILI9341(TFT_CS, TFT_DC, TFT_RST);
@@ -101,7 +103,16 @@ enum MenuMode {
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 // Global Variables ////////////////////////////////////////////////////////////////////////////////////
 int currentMode = MODE_OVERVIEW;
-volatile int rotaryEncoderTurnCount = 0;
+int lastMode = ModeCnt; // different from current to force initial update
+volatile int rotaryEncoderTurnCount = 4;
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+// Global Screen "Old" variables for screen flickering workaround ////////////////////////////////////////////////////////////////////////////////////
+float old_CO2_ppm = currentTemperature_Celsius;
+float old_batteryVoltage_V = batteryVoltage_V;
+int old_Temperature_Celsius = currentTemperature_Celsius;
+int old_waterLevel_TopTank_Percent = waterLevel_TopTank_Percent;
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 void buttonPressOnRotaryEncoder();
@@ -117,12 +128,12 @@ void setup() {
     pinMode(CO2_ALERT_LED, OUTPUT);
     pinMode(WATER_LOW_LED, OUTPUT);
 
-    pinMode(ROTARY_DT, INPUT);
-    pinMode(ROTARY_SW, INPUT);
-    pinMode(ROTARY_CLK, INPUT);
+    pinMode(ROTARY_DT, INPUT_PULLUP);
+    pinMode(ROTARY_CLK, INPUT_PULLUP);
+    pinMode(ROTARY_SW, INPUT_PULLUP);
 
     tft.begin();
-    SPI.beginTransaction(SPISettings(125000, MSBFIRST, SPI_MODE0)); // 4 MHz
+    SPI.beginTransaction(SPISettings(1000000000, MSBFIRST, SPI_MODE0)); // 4 MHz
     tft.setRotation(1);
     tft.fillScreen(ILI9341_BLACK);
     tft.setTextColor(ILI9341_WHITE);
@@ -132,109 +143,226 @@ void setup() {
     attachInterrupt(digitalPinToInterrupt(ROTARY_SW), buttonPressOnRotaryEncoder, FALLING);  // Detect button press (active low)
 }
 
-float getCO2_ppm() {
-    static float co2ppm = 0.0; 
-    static int lastReadTime = 0;
+// float getCO2_ppm(bool update = false) {
+    
+//     static int lastReadTime = 0;
 
-    int currentTime;
-    currentTime = millis();
+//     if (!update && CO2_ppm != 0.0) {
+//         return CO2_ppm; // Return last read value if not forced to update
+//     }
 
-    if (currentTime - lastReadTime < CO2_Reads_delayTime) {
-        return co2ppm; // Return last read value if delay time not met
-    }
+//     int currentTime;
+//     currentTime = millis();
 
-    int adcValue = analogRead(MQ135_PIN);
-    float voltage = (adcValue * VOLTAGE_RESOLUTION) / ADC_RESOLUTION;
-    float rs = ((VOLTAGE_RESOLUTION * RL_VALUE) / voltage) - RL_VALUE;
-    float ratio = rs / R0;
-    co2ppm = CO2_A * pow(ratio, CO2_B);
+//     if (currentTime - lastReadTime < CO2_Reads_delayTime) {
+//         return CO2_ppm; // Return last read value if delay time not met
+//     }
 
-    // Serial.print("CO2 PPM: ");
-    // Serial.println(co2ppm, 1);
+//     int adcValue = analogRead(MQ135_PIN);
+//     float voltage = (adcValue * VOLTAGE_RESOLUTION) / ADC_RESOLUTION;
+//     float rs = ((VOLTAGE_RESOLUTION * RL_VALUE) / voltage) - RL_VALUE;
+//     float ratio = rs / R0;
+//     CO2_ppm = CO2_A * pow(ratio, CO2_B);
 
-    lastReadTime = currentTime;
+//     // Serial.print("CO2 PPM: ");
+//     // Serial.println(CO2_ppm, 1);
 
-    return co2ppm;
-}
+//     lastReadTime = currentTime;
+
+//     return CO2_ppm;
+// }
 
 #pragma region Menu Mode Functions
 
 void Mode_Overview_Display() {
-    tft.fillScreen(ILI9341_BLACK);
-    tft.setTextColor(ILI9341_WHITE);
-    tft.setCursor(0, 0);
+    if (currentMode != lastMode) {
+        tft.fillScreen(ILI9341_BLACK);
+        tft.setTextColor(ILI9341_WHITE);
+    }
+
     tft.setTextSize(2);
+    tft.setCursor(0, 0);
     tft.println("Overview Mode");
 
-    tft.setCursor(0, 30);
     tft.setTextSize(1);
+
+    tft.setCursor(0, 30);
+    tft.setTextColor(ILI9341_BLACK);
+    tft.print("Temp: ");
+    tft.print(old_Temperature_Celsius);
+    tft.println(" C");
+    tft.setCursor(0, 30);
+    tft.setTextColor(ILI9341_WHITE);
     tft.print("Temp: ");
     tft.print(currentTemperature_Celsius);
     tft.println(" C");
 
     tft.setCursor(0, 50);
+    tft.setTextColor(ILI9341_BLACK);
+    tft.print("Water Level: ");
+    tft.print(waterLevel_TopTank_Percent);
+    tft.println(" %");
+    tft.setCursor(0, 50);
+    tft.setTextColor(ILI9341_WHITE);
     tft.print("Water Level: ");
     tft.print(waterLevel_TopTank_Percent);
     tft.println(" %");
 
-    float co2ppm = getCO2_ppm();
+    // float CO2_ppm = getCO2_ppm();
     tft.setCursor(0, 70);
+    tft.setTextColor(ILI9341_BLACK);
     tft.print("CO2: ");
-    tft.print(co2ppm, 1);
+    tft.print(CO2_ppm, 1);
+    tft.println(" ppm");
+    tft.setCursor(0, 70);
+    tft.setTextColor(ILI9341_WHITE);
+    tft.print("CO2: ");
+    tft.print(CO2_ppm, 1);
     tft.println(" ppm");
 
-    float batteryVoltage = (analogRead(BATTERY_MONITOR) * VOLTAGE_RESOLUTION) / ADC_RESOLUTION;
+    // float batteryVoltage = (analogRead(BATTERY_MONITOR) * VOLTAGE_RESOLUTION) / ADC_RESOLUTION;
     tft.setCursor(0, 90);
+    tft.setTextColor(ILI9341_BLACK);
     tft.print("Battery: ");
-    tft.print(batteryVoltage, 2);
+    tft.print(batteryVoltage_V, 2);
+    tft.println(" V");
+    tft.setCursor(0, 90);
+    tft.setTextColor(ILI9341_WHITE);
+    tft.print("Battery: ");
+    tft.print(batteryVoltage_V, 2);
     tft.println(" V");
     // Add more display elements as needed
 }
 
 void Mode_Temperature_Display() {
+    if (currentMode != lastMode) {
+        tft.fillScreen(ILI9341_RED);
+        tft.setTextColor(ILI9341_CYAN);
+        tft.setTextSize(3);
+    }
 
-    tft.fillScreen(ILI9341_RED);
-    tft.setTextColor(ILI9341_BLUE);
-    tft.setTextSize(3);
-    tft.setCursor(120, 160); // Center of the screen
-    tft.println("Degrees C:");
-    tft.setCursor(140, 200);
-    tft.println(currentTemperature_Celsius);
+    // --- Text header ---
+    tft.setCursor(60, 80);
+    tft.setTextColor(ILI9341_RED);
+    tft.println("Temperature:");
+
+    tft.setCursor(60, 80);
+    tft.setTextColor(ILI9341_CYAN);
+    tft.println("Temperature:");
+
+#pragma region DegreeSymbol
+    // --- Numeric display ---
+    int temp = currentTemperature_Celsius;
+    uint8_t ts = 3;  // text size
+    tft.setTextSize(ts);
+
+    int x = 130;
+    int y = 115;
+
+    char buf[16];
+    snprintf(buf, sizeof(buf), "%d", temp);  // e.g. "23"
+
+    // === Red shadow layer ===
+    tft.setTextColor(ILI9341_RED);
+    tft.setCursor(x, y);
+    tft.print(buf);
+
+    // Calculate text width to position ° symbol & 'C'
+    int charWidth = 6 * ts;                  // 6px base width per char
+    int textWidth = strlen(buf) * charWidth;
+    int cx = x + textWidth + 4;              // horizontal position for °
+    int cy = y - (8 * ts) / 2 + 15;               // move circle ABOVE the text
+
+    // Draw red ° symbol
+    tft.fillCircle(cx, cy, ts, ILI9341_RED);
+#pragma endregion
+
+    // Draw 'C' shadow
+    tft.setCursor(cx + ts * 3, y);
+    tft.print("C");
+
+    // === Cyan foreground layer ===
+    tft.setTextColor(ILI9341_CYAN);
+    tft.setCursor(x, y);
+    tft.print(buf);
+
+#pragma region DegreeSymbol
+    // Draw cyan ° symbol slightly above 'C'
+    tft.fillCircle(cx, cy, ts, ILI9341_CYAN);
+#pragma endregion
+
+    // Draw 'C'
+    tft.setCursor(cx + ts * 3, y);
+    tft.print("C");
 }
 
 void Mode_WaterLevel_Display() {
 
-    tft.fillScreen(ILI9341_BLUE);
+    if (currentMode != lastMode) {
+        tft.fillScreen(ILI9341_BLUE);
+        tft.setTextColor(ILI9341_WHITE);
+        tft.setTextSize(3);
+    }
+
+    tft.setTextColor(ILI9341_BLUE);
+    tft.setCursor(60, 80);
+    tft.println("Water Level:");
+    tft.setCursor(130, 115);
+    tft.print(waterLevel_TopTank_Percent);
+    tft.println("%");
+    
     tft.setTextColor(ILI9341_WHITE);
-    tft.setTextSize(3);
-    tft.setCursor(100, 160); // Center of the screen
-    tft.println("Water Level %:");
-    tft.setCursor(140, 200);
-    tft.println(waterLevel_TopTank_Percent);
+    tft.setCursor(60, 80);
+    tft.println("Water Level:");
+    tft.setCursor(130, 115);
+    tft.print(waterLevel_TopTank_Percent);
+    tft.println("%");
 }
 
 void Mode_CO2Level_Display() {
-    float co2ppm = getCO2_ppm();
+    // float CO2_ppm = getCO2_ppm();
 
-    tft.fillScreen(ILI9341_GREEN);
+    if (currentMode != lastMode) {
+        tft.fillScreen(ILI9341_GREEN);
+        tft.setTextColor(ILI9341_BLACK);
+        tft.setTextSize(3);
+    }
+
+    tft.setTextColor(ILI9341_GREEN);
+    tft.setCursor(60, 80);
+    tft.println("CO2 Density:");
+    tft.setCursor(90, 115);
+    tft.print(CO2_ppm, 0);
+    tft.println(" ppm");
+
     tft.setTextColor(ILI9341_BLACK);
-    tft.setTextSize(3);
-    tft.setCursor(100, 160); // Center of the screen
-    tft.println("CO2 ppm:");
-    tft.setCursor(140, 200);
-    tft.println(co2ppm, 1);
+    tft.setCursor(60, 80);
+    tft.println("CO2 Density:");
+    tft.setCursor(90, 115);
+    tft.print(CO2_ppm, 0);
+    tft.println(" ppm");
 }
 
 void Mode_BatteryStatus_Display() {
-    float batteryVoltage = (analogRead(BATTERY_MONITOR) * VOLTAGE_RESOLUTION) / ADC_RESOLUTION;
+    // float batteryVoltage = (analogRead(BATTERY_MONITOR) * VOLTAGE_RESOLUTION) / ADC_RESOLUTION;
 
+    if (currentMode != lastMode) {
+        tft.fillScreen(ILI9341_YELLOW);
+        tft.setTextColor(ILI9341_PURPLE);
+        tft.setTextSize(3);
+    }
+        
+    tft.setCursor(80, 90); // Center of the screen
     tft.fillScreen(ILI9341_YELLOW);
-    tft.setTextColor(ILI9341_BLACK);
-    tft.setTextSize(3);
-    tft.setCursor(100, 160); // Center of the screen
     tft.println("Battery V:");
-    tft.setCursor(140, 200);
-    tft.println(batteryVoltage, 2);
+    tft.setCursor(130, 130);
+    tft.println(batteryVoltage_V, 2);
+
+    tft.setCursor(80, 90); // Center of the screen
+    tft.fillScreen(ILI9341_YELLOW);
+    tft.println("Battery V:");
+    tft.setCursor(130, 130);
+    tft.println(batteryVoltage_V, 2);
 }
 
 #pragma endregion
@@ -242,18 +370,18 @@ void Mode_BatteryStatus_Display() {
 void loop() {
 
 #pragma region Alerts Logic
-    // BATTERY MONITOR LOGIC
-    float batteryVoltage = (analogRead(BATTERY_MONITOR) * VOLTAGE_RESOLUTION) / ADC_RESOLUTION;
-    if (batteryVoltage <= LOW_BATTERY_THRESHOLD) {
+    // // BATTERY MONITOR LOGIC
+    // float batteryVoltage = (analogRead(BATTERY_MONITOR) * VOLTAGE_RESOLUTION) / ADC_RESOLUTION;
+    if (batteryVoltage_V <= LOW_BATTERY_THRESHOLD) {
         digitalWrite(LOW_BATTERY_LED, HIGH);
     } else {
         digitalWrite(LOW_BATTERY_LED, LOW);
     }
 
-    // CO2 LOGIC
-    float co2ppm = getCO2_ppm();
+    // // CO2 LOGIC
+    // float CO2_ppm = getCO2_ppm();
 
-    if (co2ppm <= MIN_CO2_THRESHOLD || MAX_CO2_THRESHOLD <= co2ppm) {
+    if (CO2_ppm <= MIN_CO2_THRESHOLD || MAX_CO2_THRESHOLD <= CO2_ppm) {
         digitalWrite(CO2_ALERT_LED, HIGH);
     } else {
         digitalWrite(CO2_ALERT_LED, LOW);
@@ -300,9 +428,16 @@ currentMode = abs((rotaryEncoderTurnCount / 4) % ModeCnt); // updates every 4 tu
             break;
     }
 
+    lastMode = currentMode; // Update last mode
+
+    old_batteryVoltage_V = batteryVoltage_V;
+    old_CO2_ppm = CO2_ppm;
+    old_Temperature_Celsius = currentTemperature_Celsius;
+    old_waterLevel_TopTank_Percent = waterLevel_TopTank_Percent;
+
 #pragma endregion
 
-    delay(500); // Main loop delay
+    delay(1000); // Main loop delay
 }
 
 void buttonPressOnRotaryEncoder() {
